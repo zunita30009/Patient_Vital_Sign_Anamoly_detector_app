@@ -15,15 +15,15 @@ from plotly.subplots import make_subplots
 
 from ai_reasoning import explain_with_groq
 from theme import (
-    CSS_STYLE, RISK_COLORS, CHANNEL_COLORS,
+    CSS_STYLE, LIGHT_CSS_STYLE, RISK_COLORS, CHANNEL_COLORS,
     param_card_html, alarm_banner_html, risk_pill_html, alarm_audio_html,
+    ecg_hero_svg, step_card_html,
 )
 from vitals_engine import (
     VitalAgentState, PATIENT_PROFILES, FORCE_ANOMALY_OPTIONS, PARAM_META, PARAMS, RISK_ORDER,
 )
 
 st.set_page_config(page_title="Vital Sign Anomaly Detector", page_icon="🩺", layout="wide")
-st.markdown(CSS_STYLE, unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +39,9 @@ if "last_alarmed_alert_id" not in st.session_state:
     st.session_state.last_alarmed_alert_id = -1
 
 agent = st.session_state.agent
+has_data = bool(agent.history)
+
+st.markdown(CSS_STYLE if has_data else LIGHT_CSS_STYLE, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Sidebar
@@ -86,33 +89,61 @@ with st.sidebar:
     manual = st.button("➕ Take one reading manually", use_container_width=True)
 
 # ---------------------------------------------------------------------------
-# Header
+# Header / entrance screen
 # ---------------------------------------------------------------------------
-st.markdown('<div class="vsad-title">🩺 Patient Vital Sign Anomaly Detector</div>', unsafe_allow_html=True)
-st.markdown(
-    f'<div class="vsad-subtitle">Live monitoring · <b>{profile_name}</b> · '
-    f'rule-based detection engine + Groq reasoning layer</div>',
-    unsafe_allow_html=True,
-)
-
 latest = agent.history[-1] if agent.history else None
 
+if not latest:
+    st.markdown('<div class="vsad-hero">', unsafe_allow_html=True)
+    st.markdown('<div class="vsad-hero-eyebrow">AI-DRIVEN PATIENT MONITORING</div>', unsafe_allow_html=True)
+    st.markdown('<div class="vsad-hero-title">Catch a deteriorating patient<br>before it becomes an emergency.</div>',
+                unsafe_allow_html=True)
+    st.markdown(
+        '<div class="vsad-hero-sub">This agent watches five vital signs at once, scores each one against '
+        f'<b>{profile_name}</b> baselines, and raises an alarm — with a plain-language clinical note — '
+        'the moment something looks wrong.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown(ecg_hero_svg(), unsafe_allow_html=True)
+
+    s1, s2, s3 = st.columns(3)
+    s1.markdown(step_card_html("01", "Ingest", "A live feed of Heart Rate, SpO2, Blood Pressure, "
+                                "Temperature, and Respiratory Rate arrives continuously."), unsafe_allow_html=True)
+    s2.markdown(step_card_html("02", "Detect", "Each parameter is scored against this patient's own normal "
+                                "range — risk escalates to Critical if two or more go abnormal together."),
+                unsafe_allow_html=True)
+    s3.markdown(step_card_html("03", "Alert", "A color-coded alarm fires instantly, paired with an "
+                                "AI-generated note explaining what the care team should do next."),
+                unsafe_allow_html=True)
+
+    st.write("")
+    cta_l, cta_c, cta_r = st.columns([1, 1, 1])
+    with cta_c:
+        if st.button("▶ Start Monitoring", use_container_width=True, type="primary"):
+            st.session_state.running = True
+            st.rerun()
+
 # ---------------------------------------------------------------------------
-# Alarm banner (+ optional sound on new Critical alert)
+# Live dashboard (dark theme)
 # ---------------------------------------------------------------------------
-if latest:
+else:
+    st.markdown('<div class="vsad-title">🩺 Patient Vital Sign Anomaly Detector</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="vsad-subtitle">Live monitoring · <b>{profile_name}</b> · '
+        f'rule-based detection engine + Groq reasoning layer</div>',
+        unsafe_allow_html=True,
+    )
+
     triggered = [PARAM_META[p]["label"] for p in PARAMS
                  if RISK_ORDER[latest[f"{p}_risk"]] >= RISK_ORDER["Moderate"]]
     st.markdown(alarm_banner_html(latest["overall_risk"], triggered), unsafe_allow_html=True)
 
-    if (sound_on and agent.alerts and latest["overall_risk"] == "Critical"
-            and agent.alerts[-1] is not None):
+    if (sound_on and agent.alerts and latest["overall_risk"] == "Critical"):
         last_alert_idx = len(agent.alerts) - 1
         if agent.alerts[-1]["risk_level"] == "Critical" and last_alert_idx != st.session_state.last_alarmed_alert_id:
             st.markdown(alarm_audio_html(), unsafe_allow_html=True)
             st.session_state.last_alarmed_alert_id = last_alert_idx
-else:
-    st.info("Press **Start** in the sidebar (or take one manual reading) to begin monitoring.")
 
 # ---------------------------------------------------------------------------
 # Parameter cards + composite gauge
@@ -173,29 +204,27 @@ if latest:
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 # ---------------------------------------------------------------------------
-# Alert log
+# Alert log + architecture expander (dashboard state only)
 # ---------------------------------------------------------------------------
-st.markdown("#### 📋 Alert Log")
-if not agent.alerts:
-    st.caption("No anomalies flagged yet — alerts will appear here the moment a parameter crosses threshold.")
-else:
-    for a in reversed(agent.alerts[-12:]):
-        color = RISK_COLORS.get(a["risk_level"], "#8a97a8")
-        pills = "".join(risk_pill_html(PARAM_META[p]["short"], a["risk"][f"{p}_risk"]) for p in a["triggered_params"])
-        st.markdown(
-            f"""<div class="vsad-alert" style="border-left-color:{color};">
-                <div class="vsad-alert-meta">{a['timestamp'].strftime('%H:%M:%S')} · score {a['score']}/100 · {a['risk_level']}</div>
-                <div style="margin-bottom:6px;">{pills}</div>
-                <div class="vsad-alert-explain">{a['explanation'] or ''}</div>
-            </div>""",
-            unsafe_allow_html=True,
-        )
+if latest:
+    st.markdown("#### 📋 Alert Log")
+    if not agent.alerts:
+        st.caption("No anomalies flagged yet — alerts will appear here the moment a parameter crosses threshold.")
+    else:
+        for a in reversed(agent.alerts[-12:]):
+            color = RISK_COLORS.get(a["risk_level"], "#8a97a8")
+            pills = "".join(risk_pill_html(PARAM_META[p]["short"], a["risk"][f"{p}_risk"]) for p in a["triggered_params"])
+            st.markdown(
+                f"""<div class="vsad-alert" style="border-left-color:{color};">
+                    <div class="vsad-alert-meta">{a['timestamp'].strftime('%H:%M:%S')} · score {a['score']}/100 · {a['risk_level']}</div>
+                    <div style="margin-bottom:6px;">{pills}</div>
+                    <div class="vsad-alert-explain">{a['explanation'] or ''}</div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
 
-# ---------------------------------------------------------------------------
-# About / architecture — quick read for hackathon judges
-# ---------------------------------------------------------------------------
-with st.expander("ℹ️ How this agent works (architecture, for judges)"):
-    st.markdown("""
+    with st.expander("ℹ️ How this agent works (architecture, for judges)"):
+        st.markdown("""
 **Pipeline:** `Ingestion → Preprocessing → Rule-Based Risk Engine → Alerting → AI Explanation Layer → Dashboard`
 
 - **Ingestion & preprocessing** (`vitals_engine.py`) simulates a live vital-sign feed and
