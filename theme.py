@@ -48,13 +48,13 @@ CSS_STYLE = FONT_CSS + """
 html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
 .stApp {
     background: radial-gradient(circle at 15% 0%, #101823 0%, #0a0e14 55%);
-    color: %(text)s;
+    color: __TEXT__;
 }
 #MainMenu, footer, header {visibility: hidden;}
 .block-container { padding-top: 1.4rem; max-width: 1200px; }
 
 .vsad-title { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 0; }
-.vsad-subtitle { color: %(text_dim)s; font-size: 0.95rem; margin-top: 2px; margin-bottom: 1.2rem; }
+.vsad-subtitle { color: __TEXT_DIM__; font-size: 0.95rem; margin-top: 2px; margin-bottom: 1.2rem; }
 
 .vsad-mono { font-family: 'JetBrains Mono', monospace; }
 
@@ -90,21 +90,21 @@ html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
 
 /* Parameter cards */
 .vsad-card {
-    background: %(panel)s;
-    border: 1px solid %(panel_border)s;
+    background: __PANEL__;
+    border: 1px solid __PANEL_BORDER__;
     border-radius: 12px;
     padding: 14px 16px;
-    height: 100%%;
+    height: 100%;
 }
 .vsad-card-label {
-    font-size: 0.72rem; letter-spacing: 0.06em; color: %(text_dim)s;
+    font-size: 0.72rem; letter-spacing: 0.06em; color: __TEXT_DIM__;
     text-transform: uppercase; margin-bottom: 4px;
 }
 .vsad-card-value {
     font-family: 'JetBrains Mono', monospace; font-size: 1.9rem; font-weight: 700;
     line-height: 1.1;
 }
-.vsad-card-unit { font-size: 0.85rem; color: %(text_dim)s; font-weight: 400; margin-left: 4px; }
+.vsad-card-unit { font-size: 0.85rem; color: __TEXT_DIM__; font-weight: 400; margin-left: 4px; }
 .vsad-card-risk {
     display: inline-block; margin-top: 8px; font-size: 0.72rem; font-weight: 600;
     padding: 2px 9px; border-radius: 999px;
@@ -119,15 +119,20 @@ html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
     margin-bottom: 8px;
     font-size: 0.88rem;
 }
-.vsad-alert-meta { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: %(text_dim)s; margin-bottom: 4px; }
-.vsad-alert-explain { color: %(text)s; font-style: italic; }
+.vsad-alert-meta { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: __TEXT_DIM__; margin-bottom: 4px; }
+.vsad-alert-explain { color: __TEXT__; font-style: italic; }
 
 .vsad-pill {
     display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600;
     margin-right: 4px;
 }
 </style>
-""" % {"text": TEXT, "text_dim": TEXT_DIM, "panel": PANEL, "panel_border": PANEL_BORDER}
+"""
+CSS_STYLE = (CSS_STYLE
+             .replace("__TEXT_DIM__", TEXT_DIM)
+             .replace("__TEXT__", TEXT)
+             .replace("__PANEL_BORDER__", PANEL_BORDER)
+             .replace("__PANEL__", PANEL))
 
 
 # ---------------------------------------------------------------------------
@@ -192,4 +197,3 @@ def beep_data_uri(freq: int = 880, duration: float = 0.35, volume: float = 0.35)
 def alarm_audio_html(freq: int = 880) -> str:
     uri = beep_data_uri(freq=freq)
     return f'<audio autoplay="true" src="{uri}"></audio>'
- 
