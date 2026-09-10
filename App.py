@@ -5,6 +5,7 @@ Patient Vital Sign Anomaly Detector — interactive Streamlit dashboard.
 Deploy target: GitHub + Streamlit Community Cloud (see README.md).
 """
 
+import os
 import time
 
 import pandas as pd
@@ -54,20 +55,13 @@ with st.sidebar:
     ranges = PATIENT_PROFILES[profile_name]
 
     try:
-        secret_key = st.secrets.get("GROQ_API_KEY", "")
+        groq_key = st.secrets.get("GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
     except Exception:
-        secret_key = ""
+        groq_key = os.environ.get("GROQ_API_KEY", "")
 
-    manual_key = st.text_input(
-        "Groq API key (optional override)", type="password", value="",
-        help="Leave blank to use the key configured in Streamlit Cloud → Secrets. "
-             "Only fill this in for local testing without a secrets.toml set up. "
-             "Free key: console.groq.com/keys.",
-    )
-    groq_key = manual_key.strip() or secret_key
-    if secret_key and not manual_key:
-        st.caption("✅ Using the securely configured API key.")
-    elif not groq_key:
+    if groq_key:
+        st.caption("✅ AI explanations enabled.")
+    else:
         st.caption("⚠️ No API key configured — alerts will show rule-based results only.")
 
     sound_on = st.checkbox("🔔 Alarm sound on Critical", value=True)
