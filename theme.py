@@ -39,11 +39,37 @@ RISK_COLORS = {
     "Critical": "#FF4757",
 }
 
+# Light theme — used only for the pre-monitoring entrance screen. The dark
+# ICU-monitor theme above is used once real readings start coming in.
+LIGHT_BG = "#F5F8FB"
+LIGHT_PANEL = "#FFFFFF"
+LIGHT_PANEL_BORDER = "rgba(15,23,42,0.08)"
+LIGHT_TEXT = "#0F172A"
+LIGHT_TEXT_DIM = "#5B6B82"
+ACCENT = "#0EA5A4"      # teal — the one bold accent on the entrance screen
+ACCENT_DEEP = "#155E75"
+
+# Streamlit's own chrome (main menu, footer, the top decoration bar, the
+# floating toolbar/status widget) — hidden everywhere, in both themes.
+# display:none removes the space entirely, unlike visibility:hidden.
+CHROME_CSS = """
+<style>
+#MainMenu, footer, header,
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"] {
+    display: none !important;
+    height: 0 !important;
+}
+.block-container { padding-top: 1.4rem !important; }
+</style>
+"""
+
 FONT_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
 """
 
-CSS_STYLE = FONT_CSS + """
+CSS_STYLE = CHROME_CSS + FONT_CSS + """
 <style>
 html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
 .stApp {
@@ -51,7 +77,7 @@ html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
     color: __TEXT__;
 }
 #MainMenu, footer, header {visibility: hidden;}
-.block-container { padding-top: 1.4rem; max-width: 1200px; }
+.block-container { max-width: 1200px; }
 
 .vsad-title { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 0; }
 .vsad-subtitle { color: __TEXT_DIM__; font-size: 0.95rem; margin-top: 2px; margin-bottom: 1.2rem; }
@@ -197,3 +223,93 @@ def beep_data_uri(freq: int = 880, duration: float = 0.35, volume: float = 0.35)
 def alarm_audio_html(freq: int = 880) -> str:
     uri = beep_data_uri(freq=freq)
     return f'<audio autoplay="true" src="{uri}"></audio>'
+
+
+# ---------------------------------------------------------------------------
+# LIGHT THEME — entrance screen only
+# ---------------------------------------------------------------------------
+
+LIGHT_CSS_STYLE = CHROME_CSS + FONT_CSS + """
+<style>
+.stApp {
+    background: __LIGHT_BG__ !important;
+    color: __LIGHT_TEXT__ !important;
+}
+.block-container { max-width: 900px; padding-top: 2rem; }
+[data-testid="stSidebar"] {
+    background: __LIGHT_PANEL__ !important;
+    border-right: 1px solid __LIGHT_PANEL_BORDER__;
+}
+[data-testid="stSidebar"] * { color: __LIGHT_TEXT__ !important; }
+
+.vsad-hero { text-align: center; padding: 1.2rem 0 0.4rem 0; }
+.vsad-hero-eyebrow {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: __ACCENT__;
+    letter-spacing: 0.04em; margin-bottom: 10px;
+}
+.vsad-hero-title {
+    font-size: 2.6rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1;
+    color: __LIGHT_TEXT__; margin-bottom: 14px;
+}
+.vsad-hero-sub {
+    font-size: 1.05rem; color: __LIGHT_TEXT_DIM__; max-width: 620px; margin: 0 auto 1.6rem auto;
+    line-height: 1.55;
+}
+
+.vsad-step-card {
+    background: __LIGHT_PANEL__; border: 1px solid __LIGHT_PANEL_BORDER__; border-radius: 14px;
+    padding: 20px 18px; height: 100%;
+}
+.vsad-step-num {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: __ACCENT__; font-weight: 700;
+    margin-bottom: 8px;
+}
+.vsad-step-title { font-weight: 600; font-size: 1.02rem; margin-bottom: 6px; color: __LIGHT_TEXT__; }
+.vsad-step-body { font-size: 0.88rem; color: __LIGHT_TEXT_DIM__; line-height: 1.5; }
+
+.vsad-ecg-wrap { display: flex; justify-content: center; margin: 0.4rem 0 1.6rem 0; }
+</style>
+"""
+LIGHT_CSS_STYLE = (LIGHT_CSS_STYLE
+                    .replace("__LIGHT_BG__", LIGHT_BG)
+                    .replace("__LIGHT_PANEL_BORDER__", LIGHT_PANEL_BORDER)
+                    .replace("__LIGHT_PANEL__", LIGHT_PANEL)
+                    .replace("__LIGHT_TEXT_DIM__", LIGHT_TEXT_DIM)
+                    .replace("__LIGHT_TEXT__", LIGHT_TEXT)
+                    .replace("__ACCENT__", ACCENT))
+
+
+def ecg_hero_svg(width: int = 460, height: int = 90) -> str:
+    """
+    A single animated ECG trace — the one deliberate moment of motion on the
+    entrance screen (the line draws itself once, then holds), grounded in
+    the product's actual subject matter rather than decorative flourish.
+    """
+    path = (
+        f"M0,{height*0.5} L{width*0.16},{height*0.5} "
+        f"L{width*0.22},{height*0.5} L{width*0.26},{height*0.15} L{width*0.30},{height*0.85} "
+        f"L{width*0.34},{height*0.5} L{width*0.42},{height*0.5} "
+        f"L{width*0.5},{height*0.5} L{width*0.55},{height*0.3} L{width*0.6},{height*0.5} "
+        f"L{width*0.68},{height*0.5} L{width*0.74},{height*0.15} L{width*0.78},{height*0.85} "
+        f"L{width*0.82},{height*0.5} L{width},{height*0.5}"
+    )
+    return f"""
+    <div class="vsad-ecg-wrap">
+    <svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="{path}" stroke="{ACCENT}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
+              stroke-dasharray="1400" stroke-dashoffset="1400">
+            <animate attributeName="stroke-dashoffset" from="1400" to="0" dur="1.6s" fill="freeze" />
+        </path>
+    </svg>
+    </div>
+    """
+
+
+def step_card_html(number: str, title: str, body: str) -> str:
+    return f"""
+    <div class="vsad-step-card">
+        <div class="vsad-step-num">{number}</div>
+        <div class="vsad-step-title">{title}</div>
+        <div class="vsad-step-body">{body}</div>
+    </div>
+    """
