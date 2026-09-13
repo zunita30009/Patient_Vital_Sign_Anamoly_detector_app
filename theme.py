@@ -18,25 +18,28 @@ import wave
 # ---------------------------------------------------------------------------
 
 BG = "#0a0e14"
-PANEL = "#121923"
-PANEL_BORDER = "rgba(255,255,255,0.07)"
-TEXT = "#e7edf5"
-TEXT_DIM = "#8a97a8"
+PANEL = "#141b26"
+PANEL_BORDER = "rgba(255,255,255,0.12)"
+TEXT = "#f3f6fa"
+TEXT_DIM = "#98a5b8"
 
 CHANNEL_COLORS = {
-    "heart_rate": "#34E58C",     # ECG green
-    "spo2": "#3FC7EA",           # SpO2 cyan
-    "systolic_bp": "#FF9F5A",    # NIBP amber/orange
-    "temperature": "#FFD166",    # Temp yellow
+    "heart_rate": "#39FF9E",     # ECG green
+    "spo2": "#38D6F5",           # SpO2 cyan
+    "systolic_bp": "#FF9A3C",    # NIBP orange
+    "temperature": "#FFD93D",    # Temp yellow
     "resp_rate": "#C792EA",      # Respiration violet
 }
 
+# A clear green -> cyan -> yellow -> orange -> red escalation, each step
+# visually distinct at a glance (the earlier green/yellow-green pairing
+# for Normal/Low was too close in hue to tell apart quickly).
 RISK_COLORS = {
-    "Normal": "#34E58C",
-    "Low": "#9FE870",
-    "Moderate": "#FFC24B",
-    "High": "#FF8A3D",
-    "Critical": "#FF4757",
+    "Normal": "#39FF9E",
+    "Low": "#3DDDD3",
+    "Moderate": "#FFD93D",
+    "High": "#FF9A3C",
+    "Critical": "#FF3B4E",
 }
 
 # Light theme — used only for the pre-monitoring entrance screen. The dark
@@ -98,20 +101,20 @@ html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
 }
 .vsad-banner-normal { background: rgba(52,229,140,0.08); color: #B7F5D2; }
 .vsad-banner-warning {
-    background: rgba(255,194,75,0.12); color: #FFE4B0;
+    background: rgba(255,217,61,0.12); color: #FFE4B0;
     animation: vsad-pulse-warn 1.8s ease-in-out infinite;
 }
 .vsad-banner-critical {
-    background: rgba(255,71,87,0.16); color: #FFC9CE;
+    background: rgba(255,59,78,0.16); color: #FFC9CE;
     animation: vsad-pulse-crit 1s ease-in-out infinite;
 }
 @keyframes vsad-pulse-warn {
-    0%, 100% { box-shadow: 0 0 0px rgba(255,194,75,0); }
-    50% { box-shadow: 0 0 22px rgba(255,194,75,0.45); }
+    0%, 100% { box-shadow: 0 0 0px rgba(255,217,61,0); }
+    50% { box-shadow: 0 0 22px rgba(255,217,61,0.45); }
 }
 @keyframes vsad-pulse-crit {
-    0%, 100% { box-shadow: 0 0 0px rgba(255,71,87,0); }
-    50% { box-shadow: 0 0 28px rgba(255,71,87,0.65); }
+    0%, 100% { box-shadow: 0 0 0px rgba(255,59,78,0); }
+    50% { box-shadow: 0 0 28px rgba(255,59,78,0.65); }
 }
 
 /* Parameter cards */
@@ -158,12 +161,57 @@ html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
     background: __PANEL__; border: 1px solid __PANEL_BORDER__; border-radius: 12px;
     padding: 12px 14px; margin-bottom: 8px;
 }
-.vsad-bed-critical { border-color: rgba(255,71,87,0.55); animation: vsad-pulse-crit 1.2s ease-in-out infinite; }
-.vsad-bed-high { border-color: rgba(255,138,61,0.5); }
+.vsad-bed-critical { border-color: rgba(255,59,78,0.55); animation: vsad-pulse-crit 1.2s ease-in-out infinite; }
+.vsad-bed-high { border-color: rgba(255,154,60,0.5); }
 .vsad-bed-id { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: __TEXT_DIM__; }
 .vsad-bed-name { font-weight: 600; font-size: 1rem; margin: 2px 0 6px 0; }
 .vsad-bed-score { font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; font-weight: 700; }
 .vsad-bed-vitals { font-family: 'JetBrains Mono', monospace; font-size: 0.76rem; color: __TEXT_DIM__; margin-top: 6px; }
+
+/* Bedside monitor bezel (drill-down screen) */
+.vsad-monitor {
+    background: #000000;
+    border: 3px solid #1c2531;
+    border-radius: 14px;
+    padding: 14px 10px 6px 10px;
+    margin-bottom: 1rem;
+}
+.vsad-monitor-alarm {
+    border-color: #FF3B4E;
+    animation: vsad-monitor-flash 0.9s ease-in-out infinite;
+}
+@keyframes vsad-monitor-flash {
+    0%, 100% { box-shadow: 0 0 0px rgba(255,59,78,0); }
+    50% { box-shadow: 0 0 26px rgba(255,59,78,0.75); }
+}
+.vsad-monitor-topbar {
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #6b7686;
+    padding: 0 6px 10px 6px;
+}
+.vsad-monitor-alarmtag {
+    color: #FF3B4E; font-weight: 700; letter-spacing: 0.08em;
+    animation: vsad-blink 0.6s steps(1) infinite;
+}
+@keyframes vsad-blink { 50% { opacity: 0.15; } }
+
+.vsad-readout {
+    border-right: 1px solid rgba(255,255,255,0.08);
+    padding: 6px 12px;
+    text-align: left;
+}
+.vsad-readout:last-child { border-right: none; }
+.vsad-readout-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; letter-spacing: 0.08em;
+    text-transform: uppercase; margin-bottom: 2px;
+}
+.vsad-readout-value {
+    font-family: 'JetBrains Mono', monospace; font-size: 2.3rem; font-weight: 700; line-height: 1;
+}
+.vsad-readout-unit { font-size: 0.75rem; font-weight: 400; opacity: 0.75; margin-left: 3px; }
+.vsad-readout-alarm {
+    animation: vsad-blink 0.5s steps(1) infinite;
+}
 </style>
 """
 CSS_STYLE = (CSS_STYLE
@@ -184,6 +232,32 @@ def param_card_html(label: str, value, unit: str, risk: str) -> str:
         <div class="vsad-card-label">{label}</div>
         <div class="vsad-card-value">{value}<span class="vsad-card-unit"> {unit}</span></div>
         <div class="vsad-card-risk" style="background:{color}22; color:{color};">{risk}</div>
+    </div>
+    """
+
+
+def monitor_readout_html(label: str, value, unit: str, channel_color: str, is_alarm: bool) -> str:
+    """One numeric readout in a real bedside-monitor's numeric column: big
+    mono digits in the channel's own color, flashing when THIS specific
+    parameter (not just the overall banner) is in a confirmed alarm state."""
+    alarm_cls = "vsad-readout-alarm" if is_alarm else ""
+    return f"""
+    <div class="vsad-readout">
+        <div class="vsad-readout-label" style="color:{channel_color};">{label}</div>
+        <div class="vsad-readout-value {alarm_cls}" style="color:{channel_color};">{value}<span class="vsad-readout-unit">{unit}</span></div>
+    </div>
+    """
+
+
+def monitor_panel_html(readouts_html: str, in_alarm: bool, alarm_text: str = "") -> str:
+    cls = "vsad-monitor vsad-monitor-alarm" if in_alarm else "vsad-monitor"
+    topbar = (f'<div class="vsad-monitor-topbar"><span>BEDSIDE MONITOR</span>'
+              f'<span class="vsad-monitor-alarmtag">{alarm_text}</span></div>' if in_alarm else
+              '<div class="vsad-monitor-topbar"><span>BEDSIDE MONITOR</span><span>ALL PARAMS NOMINAL</span></div>')
+    return f"""
+    <div class="{cls}">
+        {topbar}
+        <div style="display:flex;">{readouts_html}</div>
     </div>
     """
 
