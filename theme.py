@@ -186,7 +186,7 @@ html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
 }
 .vsad-monitor-topbar {
     display: flex; justify-content: space-between; align-items: center;
-    font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #6b7686;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: __TEXT_DIM__;
     padding: 0 6px 10px 6px;
 }
 .vsad-monitor-alarmtag {
