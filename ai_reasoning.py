@@ -26,7 +26,7 @@ def explain_with_groq(reading: dict, risk: dict, triggered_params: list,
                        api_key: str | None = None, model: str = DEFAULT_MODEL) -> str:
     api_key = api_key or os.environ.get("GROQ_API_KEY")
     if not api_key:
-        return "Add a Groq API key in the sidebar to get an AI-generated clinical note for this alert."
+        return "Set GROQ_API_KEY in Streamlit Cloud → Secrets to get an AI-generated clinical note for this alert."
 
     try:
         from groq import Groq
@@ -56,3 +56,4 @@ diagnosis. Do not just repeat the numbers — interpret them."""
         return resp.choices[0].message.content.strip()
     except Exception as e:
         return f"AI explanation unavailable right now ({e})."
+
