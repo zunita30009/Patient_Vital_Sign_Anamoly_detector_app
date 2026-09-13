@@ -1,20 +1,39 @@
-# 🩺 Patient Vital Sign Anomaly Detector — AI Agent
+# 🏥 Ward Vital Sign Anomaly Detector — AI Triage Dashboard
 
-A live-monitoring dashboard that simulates a multi-parameter patient feed
-(Heart Rate, SpO2, Blood Pressure, Temperature, Respiratory Rate), scores
-every reading against a rule-based anomaly engine, escalates to a
-**Critical** alarm when multiple parameters go abnormal together, and
-uses **Groq** to explain each alert in plain clinical language. Built
-for GitHub + **Streamlit Community Cloud**.
+A multi-bed ward monitoring dashboard: every bed streams five vitals
+(Heart Rate, SpO2, Blood Pressure, Temperature, Respiratory Rate), gets
+scored by a rule-based engine **and** a real clinical **NEWS2** early
+warning score, and the whole ward grid re-sorts live so the sickest
+patient is always top-left — AI triage, not just a bank of single-patient
+displays. An alarm only fires once an abnormality persists across
+several readings, directly targeting the real-world "alarm fatigue"
+problem where most bedside alarms are non-actionable noise. Click any
+bed to drill into its full live dashboard with charts, alert log, and a
+Groq-generated plain-language note per alert. Built for GitHub +
+**Streamlit Community Cloud**.
+
+## Honest scope note
+
+This build does **not** include a real HL7/FHIR hospital integration,
+a live time-series database (Redis/TimescaleDB), or a trained ML
+deterioration-prediction model — those need real hospital
+infrastructure, licensed patient data, and time this project doesn't
+have. What it does include: a severity-ranked ward view, a real NEWS2
+score, an explainable rule-based alarm-fatigue mitigation, and a
+data-source layer that can replay an uploaded historical CSV shaped
+like a flattened MIMIC-IV/eICU export instead of the built-in
+simulator. The in-app "How this ward AI works" panel says all of this
+to judges directly — nothing here is oversold.
 
 ## What's in this repo
 
 | File | Purpose |
 |---|---|
-| `app.py` | The dashboard — this is the file Streamlit runs |
-| `vitals_engine.py` | Simulated ingestion, artifact filtering, rule-based multi-parameter risk engine |
+| `app.py` | The dashboard — entrance screen → ward grid → per-bed drill-down |
+| `ward.py` | Multi-bed orchestration: bed roster, severity sort, CSV replay mode |
+| `vitals_engine.py` | Simulated ingestion, artifact filtering, rule-based risk engine, NEWS2, alarm-fatigue debounce |
 | `ai_reasoning.py` | Sends already-decided alerts to Groq for a plain-language explanation |
-| `theme.py` | Dark, bedside-monitor-style visual design + alarm sound generator |
+| `theme.py` | Dark bedside-monitor dashboard theme + light entrance-screen theme + alarm sound generator |
 | `requirements.txt` | Python packages Streamlit Cloud installs automatically |
 | `.streamlit/config.toml` | Dark theme colors |
 | `.streamlit/secrets.toml.example` | Template for your API key (copy it, don't commit the real one) |
@@ -28,7 +47,7 @@ You only need a free [GitHub account](https://github.com/join).
 ### Option A: upload through the browser (no command line needed)
 1. Go to https://github.com/new, name the repo (e.g. `vital-sign-agent`), keep it **Public** (Streamlit Cloud's free tier needs this, or a linked private repo), click **Create repository**.
 2. On the new repo page, click **"uploading an existing file"**.
-3. Drag in every file from this project — `app.py`, `vitals_engine.py`, `ai_reasoning.py`, `theme.py`, `requirements.txt`, and the `.streamlit` folder (upload `config.toml` and `secrets.toml.example` — GitHub will recreate the folder for you).
+3. Drag in every file from this project — `app.py`, `ward.py`, `vitals_engine.py`, `ai_reasoning.py`, `theme.py`, `requirements.txt`, and the `.streamlit` folder (upload `config.toml` and `secrets.toml.example` — GitHub will recreate the folder for you).
 4. Scroll down, click **Commit changes**.
 
 ### Option B: using Git (if you have it installed)
@@ -83,44 +102,49 @@ Opens at `http://localhost:8501`.
 
 ---
 
-## Demoing this to hackathon judges (60-second script)
+## Demoing this to hackathon judges (90-second script)
 
-1. **Open the app** — point out the five live parameter cards (HR, SpO2,
-   NIBP, Temp, RR) and the Composite Risk Score gauge; explain each is
-   scored independently against the selected patient profile's normal
-   range.
-2. **Switch patient profile** in the sidebar (e.g. Pediatric → ICU) to
-   show the thresholds are patient-specific, not one-size-fits-all.
-3. **Use "Demo controls"** in the sidebar: pick a scenario like *"Critical
-   multi-parameter event"* and click **Start** (or take one manual
-   reading). Watch the alarm banner flash, the gauge jump, and — if you
-   added a Groq key — a plain-language explanation appear in the Alert
-   Log.
-4. **Open "How this agent works"** at the bottom to show the pipeline
-   diagram and explain why the AI only *explains* decisions instead of
-   *making* them (keeps the safety-critical alerting deterministic).
-5. **Mention the roadmap**: this is Phase 1 (rule-based) of a 3-phase
-   plan — Phase 2 swaps in an ML model trained on real patient history,
-   Phase 3 connects to a real FHIR/EHR feed.
+1. **Land on the entrance screen** — the pitch is about ward-level triage,
+   not a single monitor. Click **Start Ward Monitoring** (Simulated ward,
+   ~16 beds is a good demo size).
+2. **The ward grid appears, sorted by severity.** Point out the top metrics
+   (Beds / Critical now / Confirmed alerts / Blips filtered) and explain
+   that the grid re-sorts every reading — the sickest patient always
+   surfaces to the top automatically.
+3. **Open "How this ward AI works"** briefly to show the pipeline and the
+   explicit, honest "out of scope" section — this is where you show
+   judges you understand production constraints, not just demo tricks.
+4. **Use the "Clinical Simulation Suite"** in the sidebar: pick a scenario
+   (e.g. *"Critical multi-parameter event"*), target a specific bed, and
+   click **Advance one reading** a couple of times. Show that the first
+   abnormal reading is filtered as a "blip" and the alarm only confirms
+   once it persists — this is the alarm-fatigue mitigation in action.
+5. **Click into the flagged bed** to show the full single-patient
+   dashboard: live charts, NEWS2 score, and (if a Groq key is configured)
+   a plain-language clinical note per alert.
+6. **Mention the roadmap**: real deployment would replace the simulator
+   with an HL7/FHIR feed and add a time-series store for throughput —
+   name-drop this proactively so judges see you already know it.
 
 ---
 
-## How the "AI agent" actually works
+## How the "AI" in this actually works
 
-The rule engine (`vitals_engine.py`) is 100% deterministic — it decides
-risk levels and fires alerts with no dependency on any network call, so
-it keeps working even if Groq is slow or down. Groq's LLM is only called
-**after** an alert already exists, purely to translate the decision into
-a short note a nurse could read at a glance. This separation is a
-deliberate safety choice, not a shortcut — it means the part of the
-system that actually raises alarms is fully testable and explainable.
+Three separate, honestly-scoped pieces:
+- **Patient-specific rule engine** (`vitals_engine.py`) — deterministic thresholds against each patient profile's own normal range. No ML, no network dependency, fully testable.
+- **NEWS2** — the real, population-standard early warning score used across NHS wards, computed independently as a cross-check against the rule engine's own severity number.
+- **Groq LLM** — called only *after* an alert is already confirmed, purely to write a plain-language note. It never decides risk; if the API is unavailable, alerting still works, you just don't get the note.
 
-## Roadmap
+None of this claims to be a trained predictive model. If asked "is this
+actually AI," the honest answer is: rule-based detection + a standard
+clinical score + an LLM explanation layer — which is a legitimate,
+explainable clinical decision-support pattern, and arguably safer than a
+black-box model for a first version.
 
-- ✅ **Phase 1 (this build):** multi-parameter rule-based thresholds,
-  patient-specific normal ranges, artifact filtering, live dashboard,
-  Critical escalation on combined abnormalities.
-- **Phase 2:** ML-based predictive risk scoring trained on real
-  historical, multi-parameter patient data.
-- **Phase 3:** real ingestion via FHIR/EHR integration and real
-  push/SMS notification channels, replacing the simulated feed.
+## What a real next phase would need
+
+- **HL7/FHIR integration** against a real hospital's Epic/Cerner instance, replacing the simulator entirely.
+- **A time-series store** (TimescaleDB/Redis) to handle real multi-bed, high-frequency throughput without bottlenecking the UI.
+- **A trained deterioration-prediction model** (e.g. early sepsis or cardiac-event risk) built on licensed historical outcomes data (MIMIC-IV/eICU require a completed PhysioNet credentialing process — they can't be casually downloaded).
+- **ML-based artifact detection** (motion/noise vs. true arrhythmia) to replace today's simple flagged-artifact smoothing.
+
