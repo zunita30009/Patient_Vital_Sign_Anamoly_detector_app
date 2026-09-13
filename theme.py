@@ -57,12 +57,20 @@ ACCENT_DEEP = "#155E75"
 # display:none removes the space entirely, unlike visibility:hidden.
 CHROME_CSS = """
 <style>
-#MainMenu, footer, header,
+#MainMenu, footer,
 [data-testid="stToolbar"],
 [data-testid="stDecoration"],
 [data-testid="stStatusWidget"] {
     display: none !important;
     height: 0 !important;
+}
+/* Don't display:none the header itself — the sidebar's open/close arrow
+   lives inside it on current Streamlit versions, so hiding the whole
+   header made the sidebar (and everything in it, like the scenario
+   injection controls) impossible to reach. Make it blend in instead. */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+    height: 3rem !important;
 }
 .block-container { padding-top: 1.4rem !important; }
 </style>
