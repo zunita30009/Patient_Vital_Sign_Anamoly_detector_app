@@ -174,6 +174,9 @@ if st.session_state.selected_bed:
         st.rerun()
 
     latest = bed.latest
+    if st.button("← Back to ward overview", key="back_main"):
+        st.session_state.selected_bed = None
+        st.rerun()
     st.markdown(f'<div class="vsad-title">🩺 {bed.patient_name} · {bed.bed_id}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="vsad-subtitle">{bed.profile_name} · rule-based detection + NEWS2 + '
                 f'Groq reasoning layer</div>', unsafe_allow_html=True)
