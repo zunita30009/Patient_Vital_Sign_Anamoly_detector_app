@@ -253,6 +253,19 @@ html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
 }
 [data-testid="stSidebar"] { background: __PANEL__; }
 [data-testid="stSidebar"] * { color: __TEXT__ !important; }
+
+/* The sidebar collapse/expand arrow lives OUTSIDE the sidebar container
+   itself, in the main app body, so the rule above never reaches it — it
+   was defaulting to a dark icon that vanished against the dark background. */
+[data-testid="collapsedControl"],
+[data-testid="collapsedControl"] *,
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapseButton"] *,
+button[kind="header"],
+button[kind="header"] * {
+    color: __TEXT__ !important;
+    fill: __TEXT__ !important;
+}
 </style>
 """
 CSS_STYLE = (CSS_STYLE
