@@ -152,6 +152,18 @@ html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
     display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600;
     margin-right: 4px;
 }
+
+/* Ward grid */
+.vsad-bed {
+    background: __PANEL__; border: 1px solid __PANEL_BORDER__; border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 8px;
+}
+.vsad-bed-critical { border-color: rgba(255,71,87,0.55); animation: vsad-pulse-crit 1.2s ease-in-out infinite; }
+.vsad-bed-high { border-color: rgba(255,138,61,0.5); }
+.vsad-bed-id { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: __TEXT_DIM__; }
+.vsad-bed-name { font-weight: 600; font-size: 1rem; margin: 2px 0 6px 0; }
+.vsad-bed-score { font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; font-weight: 700; }
+.vsad-bed-vitals { font-family: 'JetBrains Mono', monospace; font-size: 0.76rem; color: __TEXT_DIM__; margin-top: 6px; }
 </style>
 """
 CSS_STYLE = (CSS_STYLE
@@ -195,6 +207,29 @@ def alarm_banner_html(overall_risk: str, triggered_labels: list) -> str:
 def risk_pill_html(label: str, risk: str) -> str:
     color = RISK_COLORS.get(risk, TEXT_DIM)
     return f'<span class="vsad-pill" style="background:{color}22; color:{color};">{label}: {risk}</span>'
+
+
+def bed_tile_html(bed_id: str, name: str, profile_name: str, reading: dict) -> str:
+    risk = reading["confirmed_risk"]
+    cls = "vsad-bed"
+    if risk == "Critical":
+        cls += " vsad-bed-critical"
+    elif risk == "High":
+        cls += " vsad-bed-high"
+    color = RISK_COLORS.get(risk, TEXT_DIM)
+    news2 = reading["news2"]
+    news2_color = {"Low": RISK_COLORS["Normal"], "Medium": RISK_COLORS["Moderate"],
+                   "High": RISK_COLORS["High"]}.get(news2["band"], TEXT_DIM)
+    return f"""
+    <div class="{cls}">
+        <div class="vsad-bed-id">{bed_id} · {profile_name}</div>
+        <div class="vsad-bed-name">{name}</div>
+        <div class="vsad-bed-score" style="color:{color};">{reading['composite_score']}<span style="font-size:0.7rem; color:{TEXT_DIM};"> /100</span></div>
+        <span class="vsad-card-risk" style="background:{color}22; color:{color};">{risk}</span>
+        <span class="vsad-pill" style="background:{news2_color}22; color:{news2_color};">NEWS2 {news2['total']}</span>
+        <div class="vsad-bed-vitals">HR {reading['heart_rate']} · SpO2 {reading['spo2']}% · NIBP {reading['systolic_bp']} · T {reading['temperature']}°C · RR {reading['resp_rate']}</div>
+    </div>
+    """
 
 
 # ---------------------------------------------------------------------------
