@@ -69,7 +69,9 @@ CHROME_CSS = """
 """
 
 FONT_CSS = """
+<style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
+</style>
 """
 
 CSS_STYLE = CHROME_CSS + FONT_CSS + """
@@ -212,6 +214,45 @@ html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
 .vsad-readout-alarm {
     animation: vsad-blink 0.5s steps(1) infinite;
 }
+
+/* Buttons — override Streamlit's default white button so it's readable
+   against the dark theme (this was invisible: white bg, near-white text).
+   Multiple selectors because Streamlit's internal button markup has
+   changed across versions — this covers both old and current DOM shapes. */
+.stButton > button,
+[data-testid="stBaseButton-secondary"],
+[data-testid="baseButton-secondary"] {
+    background: __PANEL__ !important;
+    color: __TEXT__ !important;
+    border: 1px solid rgba(255,255,255,0.35) !important;
+}
+.stButton > button:hover,
+[data-testid="stBaseButton-secondary"]:hover,
+[data-testid="baseButton-secondary"]:hover {
+    border-color: #39FF9E !important;
+    color: __TEXT__ !important;
+    background: rgba(57,255,158,0.08) !important;
+}
+.stButton > button *,
+[data-testid="stBaseButton-secondary"] *,
+[data-testid="baseButton-secondary"] * {
+    color: __TEXT__ !important;
+    fill: __TEXT__ !important;
+}
+.stButton > button[kind="primary"],
+[data-testid="stBaseButton-primary"],
+[data-testid="baseButton-primary"] {
+    background: #39FF9E !important;
+    border: none !important;
+}
+.stButton > button[kind="primary"] *,
+[data-testid="stBaseButton-primary"] *,
+[data-testid="baseButton-primary"] * {
+    color: #04241a !important;
+    fill: #04241a !important;
+}
+[data-testid="stSidebar"] { background: __PANEL__; }
+[data-testid="stSidebar"] * { color: __TEXT__ !important; }
 </style>
 """
 CSS_STYLE = (CSS_STYLE
