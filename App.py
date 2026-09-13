@@ -21,8 +21,9 @@ from plotly.subplots import make_subplots
 from ai_reasoning import explain_with_groq
 from theme import (
     CSS_STYLE, LIGHT_CSS_STYLE, RISK_COLORS, CHANNEL_COLORS,
-    param_card_html, alarm_banner_html, risk_pill_html, alarm_audio_html,
+    alarm_banner_html, risk_pill_html, alarm_audio_html,
     ecg_hero_svg, step_card_html, bed_tile_html,
+    monitor_readout_html, monitor_panel_html,
 )
 from vitals_engine import PARAM_META, PARAMS, FORCE_ANOMALY_OPTIONS
 from ward import build_simulated_ward, build_ward_from_csv, CSV_COLUMN_HELP
@@ -180,11 +181,14 @@ if st.session_state.selected_bed:
     triggered = [PARAM_META[p]["label"] for p in latest["confirmed_triggered"]]
     st.markdown(alarm_banner_html(latest["confirmed_risk"], triggered), unsafe_allow_html=True)
 
-    card_cols = st.columns(5)
-    for col, p in zip(card_cols, PARAMS):
-        meta = PARAM_META[p]
-        col.markdown(param_card_html(meta["short"], latest[p], meta["unit"], latest[f"{p}_risk"]),
-                     unsafe_allow_html=True)
+    in_alarm = latest["confirmed_risk"] in ("Moderate", "High", "Critical")
+    alarm_text = f"⚠ {latest['confirmed_risk'].upper()} — {', '.join(triggered)}" if in_alarm else ""
+    readouts = "".join(
+        monitor_readout_html(PARAM_META[p]["short"], latest[p], PARAM_META[p]["unit"],
+                              CHANNEL_COLORS[p], is_alarm=(p in latest["confirmed_triggered"]))
+        for p in PARAMS
+    )
+    st.markdown(monitor_panel_html(readouts, in_alarm=in_alarm, alarm_text=alarm_text), unsafe_allow_html=True)
 
     gauge_col, chart_col = st.columns([1, 2.4])
     with gauge_col:
@@ -194,7 +198,7 @@ if st.session_state.selected_bed:
             title={"text": f"Composite Score · NEWS2 {latest['news2']['total']} ({latest['news2']['band']})",
                    "font": {"size": 12, "color": "#8a97a8"}},
             gauge={"axis": {"range": [0, 100], "tickcolor": "#8a97a8"},
-                   "bar": {"color": RISK_COLORS.get(latest["confirmed_risk"], "#34E58C")},
+                   "bar": {"color": RISK_COLORS.get(latest["confirmed_risk"], "#39FF9E")},
                    "bgcolor": "rgba(0,0,0,0)",
                    "steps": [{"range": [0, 20], "color": "rgba(52,229,140,0.18)"},
                              {"range": [20, 45], "color": "rgba(255,194,75,0.18)"},
@@ -216,7 +220,7 @@ if st.session_state.selected_bed:
             flagged = df[df[f"{p}_risk"].isin(["Moderate", "High"])]
             if not flagged.empty:
                 fig.add_trace(go.Scatter(x=flagged["timestamp"], y=flagged[p], mode="markers",
-                                          marker=dict(color="#FF4757", size=8, symbol="x"), showlegend=False),
+                                          marker=dict(color="#FF3B4E", size=8, symbol="x"), showlegend=False),
                               row=r, col=c)
         fig.update_layout(height=340, margin=dict(t=30, b=10, l=10, r=10), paper_bgcolor="rgba(0,0,0,0)",
                            plot_bgcolor="rgba(255,255,255,0.02)", font_color="#8a97a8")
