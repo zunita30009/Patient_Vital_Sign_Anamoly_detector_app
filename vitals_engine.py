@@ -218,21 +218,65 @@ def composite_score(reading: dict, ranges: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
-# 3. ALERTING
+# NEWS2 — the real early-warning score used across UK/NHS wards (Royal
+# College of Physicians). This is population-standard (NOT patient-profile
+# relative like score_risk() above), so showing both side by side is
+# deliberate: one is this product's own patient-specific engine, the other
+# is the industry benchmark it can be checked against. We omit the SpO2
+# scale-2/supplemental-oxygen and AVPU-consciousness sub-scores since this
+# simulator has no oxygen-therapy or consciousness signal to feed them.
 # ---------------------------------------------------------------------------
 
-def build_alert(reading: dict, risk: dict, score: int) -> dict | None:
-    if RISK_ORDER[risk["overall_risk"]] < RISK_ORDER["Moderate"]:
-        return None
+def _news2_band(value, bands):
+    """bands: list of (low, high_inclusive_or_None, points), checked in order."""
+    for lo, hi, pts in bands:
+        if (lo is None or value >= lo) and (hi is None or value <= hi):
+            return pts
+    return 0
 
-    triggered = [p for p in PARAMS if RISK_ORDER[risk[f"{p}_risk"]] >= RISK_ORDER["Moderate"]]
+
+_NEWS2_BANDS = {
+    "resp_rate":   [(None, 8, 3), (9, 11, 1), (12, 20, 0), (21, 24, 2), (25, None, 3)],
+    "spo2":        [(None, 91, 3), (92, 93, 2), (94, 95, 1), (96, None, 0)],
+    "temperature": [(None, 35.0, 3), (35.1, 36.0, 1), (36.1, 38.0, 0), (38.1, 39.0, 1), (39.1, None, 2)],
+    "systolic_bp": [(None, 90, 3), (91, 100, 2), (101, 110, 1), (111, 219, 0), (220, None, 3)],
+    "heart_rate":  [(None, 40, 3), (41, 50, 1), (51, 90, 0), (91, 110, 1), (111, 130, 2), (131, None, 3)],
+}
+
+
+def news2_score(reading: dict) -> dict:
+    """Returns per-parameter NEWS2 points, the total, and the standard risk band."""
+    points = {p: _news2_band(reading[p], _NEWS2_BANDS[p]) for p in _NEWS2_BANDS}
+    total = sum(points.values())
+    any_single_3 = any(v == 3 for v in points.values())
+    if total >= 7 or (any_single_3 and total >= 5):
+        band = "High"
+    elif total >= 5 or any_single_3:
+        band = "Medium"
+    else:
+        band = "Low"
+    return {"points": points, "total": total, "band": band}
+
+
+# ---------------------------------------------------------------------------
+# 3. ALERTING — with a persistence/"debounce" gate. Real ICUs report that
+# up to ~85-90% of bedside alarms are non-actionable noise (RCP/other
+# published estimates), which is the core "alarm fatigue" problem. This is
+# a deliberately simple, fully explainable mitigation: an alarm only fires
+# once a parameter has been abnormal for `debounce_n` consecutive readings
+# in a row, instead of on every single threshold breach. It's a rule, not
+# an ML model — framed honestly as such.
+# ---------------------------------------------------------------------------
+
+def build_alert(reading: dict, confirmed_overall: str, confirmed_triggered: list, score: int) -> dict | None:
+    if RISK_ORDER[confirmed_overall] < RISK_ORDER["Moderate"]:
+        return None
     return {
         "timestamp": reading["timestamp"],
-        "risk_level": risk["overall_risk"],
+        "risk_level": confirmed_overall,
         "score": score,
-        "triggered_params": triggered,
+        "triggered_params": confirmed_triggered,
         "reading": reading,
-        "risk": risk,
     }
 
 
@@ -244,21 +288,52 @@ def build_alert(reading: dict, risk: dict, score: int) -> dict | None:
 class VitalAgentState:
     history: deque = field(default_factory=lambda: deque(maxlen=300))
     alerts: list = field(default_factory=list)
+    streaks: dict = field(default_factory=dict)       # per-param consecutive-abnormal counter
+    suppressed_count: int = 0                          # transient breaches NOT alarmed on (alarm-fatigue metric)
 
     def step(self, ranges: dict, force_anomaly: str | None = None,
-              explain_fn=None) -> tuple[dict, dict | None]:
-        prev = self.history[-1] if self.history else None
-        raw = simulate_reading(ranges, prev, force_anomaly=force_anomaly)
+              explain_fn=None, debounce_n: int = 2, raw_reading: dict | None = None) -> tuple[dict, dict | None]:
+        if raw_reading is None:
+            prev = self.history[-1] if self.history else None
+            raw = simulate_reading(ranges, prev, force_anomaly=force_anomaly)
+        else:
+            raw = raw_reading
         cleaned = clean_reading(self.history, raw)
         risk = score_risk(cleaned, ranges)
         score = composite_score(cleaned, ranges)
+        news2 = news2_score(cleaned)
         cleaned.update(risk)
         cleaned["composite_score"] = score
+        cleaned["news2"] = news2
+
+        # --- persistence gate ---
+        confirmed, pending = [], []
+        for p in PARAMS:
+            abnormal_now = RISK_ORDER[risk[f"{p}_risk"]] >= RISK_ORDER["Moderate"]
+            self.streaks[p] = self.streaks.get(p, 0) + 1 if abnormal_now else 0
+            if abnormal_now and self.streaks[p] >= debounce_n:
+                confirmed.append(p)
+            elif abnormal_now:
+                pending.append(p)
+
+        if pending and not confirmed:
+            self.suppressed_count += 1
+
+        if confirmed:
+            confirmed_high = sum(1 for p in confirmed if risk[f"{p}_risk"] == "High")
+            confirmed_worst = max((risk[f"{p}_risk"] for p in confirmed), key=lambda r: RISK_ORDER[r])
+            confirmed_overall = "Critical" if confirmed_high >= 2 else confirmed_worst
+        else:
+            confirmed_overall = "Normal"
+
+        cleaned["confirmed_risk"] = confirmed_overall
+        cleaned["confirmed_triggered"] = confirmed
+        cleaned["pending_triggered"] = pending
         self.history.append(cleaned)
 
-        alert = build_alert(cleaned, risk, score)
+        alert = build_alert(cleaned, confirmed_overall, confirmed, score)
         if alert:
-            alert["explanation"] = explain_fn(cleaned, risk) if explain_fn else None
+            alert["explanation"] = explain_fn(cleaned, risk, confirmed) if explain_fn else None
             self.alerts.append(alert)
 
         return cleaned, alert
