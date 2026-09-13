@@ -1,10 +1,15 @@
 """
 app.py
-Patient Vital Sign Anomaly Detector — interactive Streamlit dashboard.
+Patient Vital Sign Anomaly Detector — ward-level triage dashboard.
+
+Flow: light entrance screen -> ward grid (sorted by AI severity score,
+NEWS2 badge shown per bed) -> click a bed to drill into its full
+single-patient dashboard.
 
 Deploy target: GitHub + Streamlit Community Cloud (see README.md).
 """
 
+import io
 import os
 import time
 
@@ -17,203 +22,216 @@ from ai_reasoning import explain_with_groq
 from theme import (
     CSS_STYLE, LIGHT_CSS_STYLE, RISK_COLORS, CHANNEL_COLORS,
     param_card_html, alarm_banner_html, risk_pill_html, alarm_audio_html,
-    ecg_hero_svg, step_card_html,
+    ecg_hero_svg, step_card_html, bed_tile_html,
 )
-from vitals_engine import (
-    VitalAgentState, PATIENT_PROFILES, FORCE_ANOMALY_OPTIONS, PARAM_META, PARAMS, RISK_ORDER,
-)
+from vitals_engine import PARAM_META, PARAMS, FORCE_ANOMALY_OPTIONS
+from ward import build_simulated_ward, build_ward_from_csv, CSV_COLUMN_HELP
 
-st.set_page_config(page_title="Vital Sign Anomaly Detector", page_icon="🩺", layout="wide")
+st.set_page_config(page_title="Ward Vital Sign Anomaly Detector", page_icon="🩺", layout="wide")
 
 
 # ---------------------------------------------------------------------------
 # Session state
 # ---------------------------------------------------------------------------
-if "agent" not in st.session_state:
-    st.session_state.agent = VitalAgentState()
+if "ward" not in st.session_state:
+    st.session_state.ward = None            # created once the user starts monitoring
 if "running" not in st.session_state:
     st.session_state.running = False
-if "profile_name" not in st.session_state:
-    st.session_state.profile_name = list(PATIENT_PROFILES.keys())[0]
-if "last_alarmed_alert_id" not in st.session_state:
-    st.session_state.last_alarmed_alert_id = -1
+if "selected_bed" not in st.session_state:
+    st.session_state.selected_bed = None    # None = ward overview; else drill-down
+if "last_alarmed_count" not in st.session_state:
+    st.session_state.last_alarmed_count = 0
 
-agent = st.session_state.agent
-has_data = bool(agent.history)
+started = st.session_state.ward is not None
+st.markdown(CSS_STYLE if started else LIGHT_CSS_STYLE, unsafe_allow_html=True)
 
-st.markdown(CSS_STYLE if has_data else LIGHT_CSS_STYLE, unsafe_allow_html=True)
+
+def make_explain_fn(api_key):
+    def _fn(reading, risk, confirmed_triggered):
+        return explain_with_groq(reading, risk, confirmed_triggered, api_key=api_key)
+    return _fn
+
+
+try:
+    groq_key = st.secrets.get("GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
+except Exception:
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+
 
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
+force_anomaly, target_bed, manual = None, None, False
+data_source, num_beds, uploaded = "Simulated ward", 16, None
+
 with st.sidebar:
-    st.markdown("### ⚙️ Monitor setup")
-
-    profile_name = st.selectbox("Patient profile", list(PATIENT_PROFILES.keys()),
-                                 index=list(PATIENT_PROFILES.keys()).index(st.session_state.profile_name))
-    if profile_name != st.session_state.profile_name:
-        st.session_state.profile_name = profile_name
-        st.session_state.agent = VitalAgentState()
-        st.rerun()
-    ranges = PATIENT_PROFILES[profile_name]
-
-    try:
-        groq_key = st.secrets.get("GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
-    except Exception:
-        groq_key = os.environ.get("GROQ_API_KEY", "")
+    st.markdown("### ⚙️ Ward setup")
 
     if groq_key:
         st.caption("✅ AI explanations enabled.")
     else:
         st.caption("⚠️ No API key configured — alerts will show rule-based results only.")
 
+    if not started:
+        data_source = st.radio("Data source", ["Simulated ward", "Upload historical CSV"])
+        if data_source == "Simulated ward":
+            num_beds = st.slider("Number of beds", 4, 30, 16)
+        else:
+            uploaded = st.file_uploader("MIMIC-IV / eICU-style export (.csv)", type=["csv"])
+            st.caption(CSV_COLUMN_HELP)
+
     sound_on = st.checkbox("🔔 Alarm sound on Critical", value=True)
     refresh_seconds = st.slider("Reading interval (sec)", 1, 5, 2)
+    debounce_n = st.slider("Alarm confirmation window (readings)", 1, 4, 2,
+                            help="Alarm-fatigue mitigation: a parameter must stay abnormal for this "
+                                 "many consecutive readings before it's confirmed as an alert, instead "
+                                 "of firing on every noisy blip.")
 
-    st.markdown("---")
-    st.markdown("### 🧪 Demo controls (for judges)")
-    anomaly_label = st.selectbox("Inject a scenario on the next reading", list(FORCE_ANOMALY_OPTIONS.keys()))
-    force_anomaly = FORCE_ANOMALY_OPTIONS[anomaly_label]
+    if started:
+        st.session_state.ward.debounce_n = debounce_n
+        st.markdown("---")
+        st.markdown("### 🧪 Clinical Simulation Suite")
+        st.caption("Stress-test the ward AI with an injected event.")
+        anomaly_label = st.selectbox("Scenario", list(FORCE_ANOMALY_OPTIONS.keys()))
+        force_anomaly = FORCE_ANOMALY_OPTIONS[anomaly_label]
+        bed_ids = list(st.session_state.ward.beds.keys())
+        target_bed = st.selectbox("Target bed", ["Random bed"] + bed_ids)
 
-    c1, c2, c3 = st.columns(3)
-    if c1.button("▶ Start"):
-        st.session_state.running = True
-    if c2.button("⏸ Stop"):
-        st.session_state.running = False
-    if c3.button("🔄 Reset"):
-        st.session_state.agent = VitalAgentState()
-        st.session_state.running = False
-        st.session_state.last_alarmed_alert_id = -1
-        st.rerun()
+        c1, c2, c3 = st.columns(3)
+        if c1.button("▶ Start"):
+            st.session_state.running = True
+        if c2.button("⏸ Stop"):
+            st.session_state.running = False
+        if c3.button("🔄 New ward"):
+            st.session_state.ward = None
+            st.session_state.running = False
+            st.session_state.selected_bed = None
+            st.rerun()
+        manual = st.button("➕ Advance one reading", use_container_width=True)
 
-    manual = st.button("➕ Take one reading manually", use_container_width=True)
+        if st.session_state.selected_bed:
+            if st.button("← Back to ward overview", use_container_width=True):
+                st.session_state.selected_bed = None
+                st.rerun()
+
 
 # ---------------------------------------------------------------------------
-# Header / entrance screen
+# Entrance screen
 # ---------------------------------------------------------------------------
-latest = agent.history[-1] if agent.history else None
-
-if not latest:
+if not started:
     st.markdown('<div class="vsad-hero">', unsafe_allow_html=True)
-    st.markdown('<div class="vsad-hero-eyebrow">AI-DRIVEN PATIENT MONITORING</div>', unsafe_allow_html=True)
-    st.markdown('<div class="vsad-hero-title">Catch a deteriorating patient<br>before it becomes an emergency.</div>',
+    st.markdown('<div class="vsad-hero-eyebrow">AI-DRIVEN WARD MONITORING</div>', unsafe_allow_html=True)
+    st.markdown('<div class="vsad-hero-title">See which patient needs you<br>before the alarm even fires.</div>',
                 unsafe_allow_html=True)
     st.markdown(
-        '<div class="vsad-hero-sub">This agent watches five vital signs at once, scores each one against '
-        f'<b>{profile_name}</b> baselines, and raises an alarm — with a plain-language clinical note — '
-        'the moment something looks wrong.</div>',
+        '<div class="vsad-hero-sub">A ward-wide triage view across every bed, ranked by AI severity score, '
+        'with a persistence filter that cuts noisy false alarms — the exact problem behind clinical '
+        'alarm fatigue.</div>',
         unsafe_allow_html=True,
     )
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown(ecg_hero_svg(), unsafe_allow_html=True)
 
     s1, s2, s3 = st.columns(3)
-    s1.markdown(step_card_html("01", "Ingest", "A live feed of Heart Rate, SpO2, Blood Pressure, "
-                                "Temperature, and Respiratory Rate arrives continuously."), unsafe_allow_html=True)
-    s2.markdown(step_card_html("02", "Detect", "Each parameter is scored against this patient's own normal "
-                                "range — risk escalates to Critical if two or more go abnormal together."),
-                unsafe_allow_html=True)
-    s3.markdown(step_card_html("03", "Alert", "A color-coded alarm fires instantly, paired with an "
-                                "AI-generated note explaining what the care team should do next."),
+    s1.markdown(step_card_html("01", "Ingest", "Every bed streams five vitals — from the built-in "
+                                "simulator, or replayed from an uploaded historical export."), unsafe_allow_html=True)
+    s2.markdown(step_card_html("02", "Triage", "Beds are ranked live by a composite severity score and "
+                                "the clinical-standard NEWS2 early warning score."), unsafe_allow_html=True)
+    s3.markdown(step_card_html("03", "Confirm", "An alarm only fires once an abnormality persists across "
+                                "several readings — filtering the noise behind real-world alarm fatigue."),
                 unsafe_allow_html=True)
 
     st.write("")
     cta_l, cta_c, cta_r = st.columns([1, 1, 1])
     with cta_c:
-        if st.button("▶ Start Monitoring", use_container_width=True, type="primary"):
+        if st.button("▶ Start Ward Monitoring", use_container_width=True, type="primary"):
+            if data_source == "Upload historical CSV":
+                if uploaded is None:
+                    st.warning("Upload a CSV first, or switch to Simulated ward.")
+                    st.stop()
+                try:
+                    df = pd.read_csv(io.BytesIO(uploaded.getvalue()))
+                    st.session_state.ward = build_ward_from_csv(df)
+                except Exception as e:
+                    st.error(f"Couldn't load that CSV: {e}")
+                    st.stop()
+            else:
+                st.session_state.ward = build_simulated_ward(num_beds=num_beds)
             st.session_state.running = True
             st.rerun()
+    st.stop()
+
+ward = st.session_state.ward
 
 # ---------------------------------------------------------------------------
-# Live dashboard (dark theme)
+# Drill-down: single-bed detail dashboard
 # ---------------------------------------------------------------------------
-else:
-    st.markdown('<div class="vsad-title">🩺 Patient Vital Sign Anomaly Detector</div>', unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="vsad-subtitle">Live monitoring · <b>{profile_name}</b> · '
-        f'rule-based detection engine + Groq reasoning layer</div>',
-        unsafe_allow_html=True,
-    )
+if st.session_state.selected_bed:
+    bed = ward.beds.get(st.session_state.selected_bed)
+    if bed is None or bed.latest is None:
+        st.session_state.selected_bed = None
+        st.rerun()
 
-    triggered = [PARAM_META[p]["label"] for p in PARAMS
-                 if RISK_ORDER[latest[f"{p}_risk"]] >= RISK_ORDER["Moderate"]]
-    st.markdown(alarm_banner_html(latest["overall_risk"], triggered), unsafe_allow_html=True)
+    latest = bed.latest
+    st.markdown(f'<div class="vsad-title">🩺 {bed.patient_name} · {bed.bed_id}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="vsad-subtitle">{bed.profile_name} · rule-based detection + NEWS2 + '
+                f'Groq reasoning layer</div>', unsafe_allow_html=True)
 
-    if (sound_on and agent.alerts and latest["overall_risk"] == "Critical"):
-        last_alert_idx = len(agent.alerts) - 1
-        if agent.alerts[-1]["risk_level"] == "Critical" and last_alert_idx != st.session_state.last_alarmed_alert_id:
-            st.markdown(alarm_audio_html(), unsafe_allow_html=True)
-            st.session_state.last_alarmed_alert_id = last_alert_idx
+    triggered = [PARAM_META[p]["label"] for p in latest["confirmed_triggered"]]
+    st.markdown(alarm_banner_html(latest["confirmed_risk"], triggered), unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------------
-# Parameter cards + composite gauge
-# ---------------------------------------------------------------------------
-if latest:
     card_cols = st.columns(5)
     for col, p in zip(card_cols, PARAMS):
         meta = PARAM_META[p]
-        col.markdown(
-            param_card_html(meta["short"], latest[p], meta["unit"], latest[f"{p}_risk"]),
-            unsafe_allow_html=True,
-        )
+        col.markdown(param_card_html(meta["short"], latest[p], meta["unit"], latest[f"{p}_risk"]),
+                     unsafe_allow_html=True)
 
     gauge_col, chart_col = st.columns([1, 2.4])
-
     with gauge_col:
         gauge = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=latest["composite_score"],
-            number={"suffix": "", "font": {"family": "JetBrains Mono", "color": "#e7edf5"}},
-            title={"text": "Composite Risk Score", "font": {"size": 13, "color": "#8a97a8"}},
-            gauge={
-                "axis": {"range": [0, 100], "tickcolor": "#8a97a8"},
-                "bar": {"color": RISK_COLORS.get(latest["overall_risk"], "#34E58C")},
-                "bgcolor": "rgba(0,0,0,0)",
-                "steps": [
-                    {"range": [0, 20], "color": "rgba(52,229,140,0.18)"},
-                    {"range": [20, 45], "color": "rgba(255,194,75,0.18)"},
-                    {"range": [45, 70], "color": "rgba(255,138,61,0.2)"},
-                    {"range": [70, 100], "color": "rgba(255,71,87,0.22)"},
-                ],
-            },
+            mode="gauge+number", value=latest["composite_score"],
+            number={"font": {"family": "JetBrains Mono", "color": "#e7edf5"}},
+            title={"text": f"Composite Score · NEWS2 {latest['news2']['total']} ({latest['news2']['band']})",
+                   "font": {"size": 12, "color": "#8a97a8"}},
+            gauge={"axis": {"range": [0, 100], "tickcolor": "#8a97a8"},
+                   "bar": {"color": RISK_COLORS.get(latest["confirmed_risk"], "#34E58C")},
+                   "bgcolor": "rgba(0,0,0,0)",
+                   "steps": [{"range": [0, 20], "color": "rgba(52,229,140,0.18)"},
+                             {"range": [20, 45], "color": "rgba(255,194,75,0.18)"},
+                             {"range": [45, 70], "color": "rgba(255,138,61,0.2)"},
+                             {"range": [70, 100], "color": "rgba(255,71,87,0.22)"}]},
         ))
         gauge.update_layout(height=260, margin=dict(t=40, b=10, l=20, r=20),
                              paper_bgcolor="rgba(0,0,0,0)", font_color="#e7edf5")
         st.plotly_chart(gauge, use_container_width=True, config={"displayModeBar": False})
 
     with chart_col:
-        df = pd.DataFrame(agent.history)
-        fig = make_subplots(rows=2, cols=2, shared_xaxes=True, vertical_spacing=0.14,
-                             horizontal_spacing=0.08,
+        df = pd.DataFrame(bed.agent.history)
+        fig = make_subplots(rows=2, cols=2, shared_xaxes=True, vertical_spacing=0.14, horizontal_spacing=0.08,
                              subplot_titles=("Heart Rate", "SpO2", "Blood Pressure (systolic)", "Temperature"))
         chart_map = [("heart_rate", 1, 1), ("spo2", 1, 2), ("systolic_bp", 2, 1), ("temperature", 2, 2)]
         for p, r, c in chart_map:
-            color = CHANNEL_COLORS[p]
             fig.add_trace(go.Scatter(x=df["timestamp"], y=df[p], mode="lines",
-                                      line=dict(color=color, width=2.5), showlegend=False), row=r, col=c)
+                                      line=dict(color=CHANNEL_COLORS[p], width=2.5), showlegend=False), row=r, col=c)
             flagged = df[df[f"{p}_risk"].isin(["Moderate", "High"])]
             if not flagged.empty:
                 fig.add_trace(go.Scatter(x=flagged["timestamp"], y=flagged[p], mode="markers",
-                                          marker=dict(color="#FF4757", size=8, symbol="x"),
-                                          showlegend=False), row=r, col=c)
-        fig.update_layout(height=340, margin=dict(t=30, b=10, l=10, r=10),
-                           paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.02)",
-                           font_color="#8a97a8")
+                                          marker=dict(color="#FF4757", size=8, symbol="x"), showlegend=False),
+                              row=r, col=c)
+        fig.update_layout(height=340, margin=dict(t=30, b=10, l=10, r=10), paper_bgcolor="rgba(0,0,0,0)",
+                           plot_bgcolor="rgba(255,255,255,0.02)", font_color="#8a97a8")
         fig.update_xaxes(showgrid=False)
         fig.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,0.06)")
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-# ---------------------------------------------------------------------------
-# Alert log + architecture expander (dashboard state only)
-# ---------------------------------------------------------------------------
-if latest:
     st.markdown("#### 📋 Alert Log")
-    if not agent.alerts:
-        st.caption("No anomalies flagged yet — alerts will appear here the moment a parameter crosses threshold.")
+    if not bed.agent.alerts:
+        st.caption(f"No confirmed alerts yet · {bed.agent.suppressed_count} transient blip(s) filtered so far.")
     else:
-        for a in reversed(agent.alerts[-12:]):
+        st.caption(f"{bed.agent.suppressed_count} transient blip(s) filtered without alarming.")
+        for a in reversed(bed.agent.alerts[-12:]):
             color = RISK_COLORS.get(a["risk_level"], "#8a97a8")
-            pills = "".join(risk_pill_html(PARAM_META[p]["short"], a["risk"][f"{p}_risk"]) for p in a["triggered_params"])
+            pills = "".join(risk_pill_html(PARAM_META[p]["short"], latest[f"{p}_risk"]) for p in a["triggered_params"])
             st.markdown(
                 f"""<div class="vsad-alert" style="border-left-color:{color};">
                     <div class="vsad-alert-meta">{a['timestamp'].strftime('%H:%M:%S')} · score {a['score']}/100 · {a['risk_level']}</div>
@@ -223,43 +241,74 @@ if latest:
                 unsafe_allow_html=True,
             )
 
-    with st.expander("ℹ️ How this agent works (architecture, for judges)"):
+# ---------------------------------------------------------------------------
+# Ward overview grid
+# ---------------------------------------------------------------------------
+else:
+    st.markdown('<div class="vsad-title">🏥 Ward Overview — AI Triage</div>', unsafe_allow_html=True)
+    st.markdown('<div class="vsad-subtitle">Sorted by composite severity score, highest risk first · '
+                'click a bed to open its full monitor</div>', unsafe_allow_html=True)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Beds", len(ward.beds))
+    m2.metric("Critical now", ward.critical_bed_count())
+    m3.metric("Confirmed alerts", ward.total_alerts())
+    m4.metric("Blips filtered", ward.total_suppressed(),
+              help="Readings that briefly crossed a threshold but didn't persist long enough to "
+                   "become a confirmed alarm — the alarm-fatigue mitigation at work.")
+
+    ordered = ward.ordered_bed_ids()
+    cols = st.columns(4)
+    for i, bed_id in enumerate(ordered):
+        bed = ward.beds[bed_id]
+        if bed.latest is None:
+            continue
+        with cols[i % 4]:
+            st.markdown(bed_tile_html(bed.bed_id, bed.patient_name, bed.profile_name, bed.latest),
+                        unsafe_allow_html=True)
+            if st.button("Open monitor", key=f"open_{bed_id}", use_container_width=True):
+                st.session_state.selected_bed = bed_id
+                st.rerun()
+
+    with st.expander("ℹ️ How this ward AI works (architecture, for judges)"):
         st.markdown("""
-**Pipeline:** `Ingestion → Preprocessing → Rule-Based Risk Engine → Alerting → AI Explanation Layer → Dashboard`
+**Pipeline:** `Ingestion (sim or historical CSV) → Preprocessing → Per-Patient Rule Engine + NEWS2 → Persistence Filter → Alerting → AI Explanation → Ward-wide Triage Ranking`
 
-- **Ingestion & preprocessing** (`vitals_engine.py`) simulates a live vital-sign feed and
-  filters flagged sensor artifacts — without ever smoothing away a genuine change, since
-  that would defeat the point of a monitor.
-- **Detection engine** scores each parameter independently against the selected patient
-  profile's normal range (Normal / Low / Moderate / High), then escalates to **Critical**
-  automatically when two or more parameters are abnormal at once.
-- **Alerting** fires the moment any parameter reaches Moderate or above — this logic is
-  deterministic and unit-testable on its own, with no dependency on the AI call succeeding.
-- **AI reasoning layer** (`ai_reasoning.py`) sends only the *already-decided* risk data to
-  Groq's Llama model, which writes a short plain-language note for the care team. The LLM
-  never sets the risk level itself.
+- **AI triage:** every bed gets a composite severity score (0-100) and a real **NEWS2** early
+  warning score computed independently; the grid re-sorts every reading so the sickest
+  patient is always at the top-left — this is the ward-level decision-support layer, not
+  just a bank of single-patient displays.
+- **Alarm-fatigue mitigation:** a parameter must stay abnormal for a configurable number of
+  consecutive readings before it's confirmed as an alert (see the sidebar slider). This is a
+  transparent, rule-based persistence filter — explicitly not framed as ML, since real ICUs
+  report the large majority of bedside alarms are non-actionable, and an honest fix here is
+  a debounce rule, not a black box.
+- **Data source:** simulated by default, or an uploaded CSV shaped like a flattened
+  PhysioNet MIMIC-IV/eICU export, replayed per bed through the identical scoring pipeline.
+  Real hospitals integrate via HL7/FHIR against live hospital infrastructure — that's out of
+  scope for a hackathon build and is called out here rather than faked.
+- **Drill-down:** clicking a bed opens the full single-patient dashboard — live charts,
+  confirmed alert log, and a Groq-generated plain-language note per alert.
 
-**Roadmap (per the product's phased plan):** this build is Phase 1 — rule-based thresholds
-for a fixed parameter set. Phase 2 would swap in an ML model trained on real historical
-patient data for predictive, multi-parameter risk scoring. Phase 3 would replace the
-simulated feed with a real FHIR/EHR integration and real push/SMS notification channels.
+**Out of scope, and why:** a production version of this would need a time-series store
+(e.g. TimescaleDB/Redis) for high-frequency multi-bed throughput, and a real ML model for
+deterioration prediction (e.g. early sepsis risk) trained on historical outcomes — both
+need infrastructure and licensed data this build doesn't have access to.
 """)
 
 # ---------------------------------------------------------------------------
-# Manual step / auto-run loop
+# Step / auto-run loop
 # ---------------------------------------------------------------------------
-def make_explain_fn(api_key):
-    def _fn(reading, risk):
-        triggered = [p for p in PARAMS if RISK_ORDER[risk[f"{p}_risk"]] >= RISK_ORDER["Moderate"]]
-        return explain_with_groq(reading, risk, triggered, api_key=api_key)
-    return _fn
-
+resolved_target = None if target_bed in (None, "Random bed") else target_bed
 
 if manual:
-    agent.step(ranges, force_anomaly=force_anomaly, explain_fn=make_explain_fn(groq_key))
+    ward.step_all(force_anomaly=force_anomaly, force_bed_id=resolved_target, explain_fn=make_explain_fn(groq_key))
     st.rerun()
 
 if st.session_state.running:
-    agent.step(ranges, force_anomaly=force_anomaly, explain_fn=make_explain_fn(groq_key))
+    ward.step_all(force_anomaly=force_anomaly, force_bed_id=resolved_target, explain_fn=make_explain_fn(groq_key))
+    if sound_on and ward.critical_bed_count() > 0 and ward.total_alerts() != st.session_state.last_alarmed_count:
+        st.markdown(alarm_audio_html(), unsafe_allow_html=True)
+    st.session_state.last_alarmed_count = ward.total_alerts()
     time.sleep(refresh_seconds)
     st.rerun()
